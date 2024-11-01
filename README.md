@@ -24,5 +24,5 @@ We will use the following open source LLMs:
 2. [Implicit Hate](https://paperswithcode.com/dataset/implicit-hate): The ElSherief et al. (2021) dataset includes 22,056 tweets from prominent U.S. extremist groups, with 6,346 tweets labeled as containing implicit hate speech and fine-grained annotations for each message and its implications.
 
 ## References
-[ToxiGen: A Large-Scale Machine-Generated Dataset for Adversarial and Implicit Hate Speech Detection](https://aclanthology.org/2022.acl-long.234) (Hartvigsen et al., ACL 2022)
-[Latent Hatred: A Benchmark for Understanding Implicit Hate Speech](https://aclanthology.org/2021.emnlp-main.29) (ElSherief et al., EMNLP 2021)
+[ToxiGen: A Large-Scale Machine-Generated Dataset for Adversarial and Implicit Hate Speech Detection](https://aclanthology.org/2022.acl-long.234) (Hartvigsen et al., ACL 2022)<br/>
+[Latent Hatred: A Benchmark for Understanding Implicit Hate Speech](https://aclanthology.org/2021.emnlp-main.29) (ElSherief et al., EMNLP 2021)<br/>
