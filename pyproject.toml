@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "implihate"
+version = "0.1.0"
+description = "Detect hate speech from text and determine if the hate is human or AI generated"
+authors = ["Farnaz Asrari, Steven Herrera, Yueru Yan"]
+license = "None"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+
+[tool.poetry.group.commits.dependencies]
+pre-commit = "^4.0.1"
+
+
+[tool.poetry.group.dev.dependencies]
+invoke = "^2.2.0"
+
+
+[tool.poetry.group.checks.dependencies]
+coverage = "^7.6.4"
+pytest = "^8.3.3"
+mypy = "^1.13.0"
+ruff = "^0.7.1"
+bandit = "^1.7.10"
+pytest-cov = "^6.0.0"
+pytest-xdist = "^3.6.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,7 @@
+run:
+  echo: true
+
+project:
+  name: implihate
+  package: implihate
+  repository: implihate
