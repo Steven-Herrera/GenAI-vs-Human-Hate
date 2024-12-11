@@ -268,13 +268,17 @@ def main(sub_df=False):
     MAX_LEN = 128
     LEARNING_RATE = 0.001
     BATCH_SIZE = 2
-    EPOCHS = 3
+    EPOCHS = 10
     CHECKPOINT_INTERVAL = 2  # Save checkpoint every 2 epochs
     pretrained_model_name = "GroNLP/hateBERT"
     NUM_CLASSES = 2
     CHECKPOINT_DIR = "checkpoints"
     LOG_DIR = "logs"
     GPU_ID = 4
+    PATIENCE = 5
+    assert (
+        PATIENCE > CHECKPOINT_INTERVAL
+    ), "Checkpoint Interval must be greater than Patience"
     model = CustomHateBERTModel(pretrained_model_name, NUM_CLASSES)
 
     # Loss function and optimizer
@@ -324,6 +328,14 @@ def main(sub_df=False):
             best_f1 = save_checkpoint(
                 model, optimizer, epoch, train_f1score, best_f1, save_dir=CHECKPOINT_DIR
             )
+
+        if train_f1score > best_f1:
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement > PATIENCE:
+            break
 
     # Close TensorBoard writer
     writer.close()
