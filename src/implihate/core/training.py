@@ -37,6 +37,43 @@ def save_checkpoint(
         return f1_score  # Update best F1-score
     return best_f1
 
+def _hsd_label_to_int(label):
+    """Converts the labels found in the HSD_final_merged dataset into integers for training a model
+
+    Args:
+        label (str): Either Human or AI
+
+    Returns:
+        integer_label (int): 0 for human and 1 for AI
+
+    Raises:
+        ValueError: Label isn't Human or AI
+    """
+    if "Human":
+        integer_label = 0
+    elif "AI":
+        integer_label = 1
+    else:
+        raise ValueError(f"label should be Human or AI. Got: {label}")
+    return integer_label
+
+def load_hsd_dataset():
+    """Load Yueru's version of the merged datasets
+
+    Returns:
+        hsd_df (pd.DataFrame): A dataframe with the texts and labels
+    
+    Raises:
+        AssertionError: hsd_df columns are not exactly text and label
+    """
+    cols = ['text', 'label']
+    df = pd.read_csv("../../../data/HSD_final_merged.csv")
+    df['Label'] = df['Label'].apply(lambda x: _hsd_label_to_int(x))
+    df = df.rename(columns={"Label": 'label'})
+    hsd_df = df[cols]
+    hsd_cols = list(hsd_df.columns)
+    assert hsd_cols == cols, hsd_cols
+    return hsd_df
 
 def create_binary_dataset():
     """Imports the Implicit Hate and Toxigen datasets. Labels all Implicit Hate data as 0 for
@@ -112,7 +149,7 @@ def accuracy(preds, labels):
     return (predictions == labels).sum().item() / labels.size(0)
 
 
-def f1_score_metric(y_true, y_pred, average="weighted"):
+def f1_score_metric(y_true, y_pred, average="binary"):
     """Calculates the F1 score for predictions and true labels.
 
     Args:
@@ -261,19 +298,20 @@ def create_text_classification_dataset(df, tokenizer_name, max_len):
     return TextClassificationDataset(texts, labels, tokenizer, max_len)
 
 
-def main(sub_df=False):
+def main(sub_df=False, hsd_merged=False):
     """Train a binary model with checkpointing and metrics logging."""
     # Configurations
     FRAC = 0.005
     MAX_LEN = 128
     LEARNING_RATE = 0.001
     BATCH_SIZE = 2
-    EPOCHS = 10
-    CHECKPOINT_INTERVAL = 2  # Save checkpoint every 2 epochs
+    EPOCHS = 15
+    CHECKPOINT_INTERVAL = 1  # Save checkpoint every 2 epochs
     pretrained_model_name = "GroNLP/hateBERT"
+    model_name = pretrained_model_name.split("/")[-1]
     NUM_CLASSES = 2
-    CHECKPOINT_DIR = "checkpoints"
-    LOG_DIR = "logs"
+    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}"
+    LOG_DIR = f"logs_hsd_{model_name}"
     GPU_ID = 4
     PATIENCE = 5
     assert (
@@ -286,13 +324,20 @@ def main(sub_df=False):
     optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
 
     print("Creating dataset")
-    ai_df = create_binary_dataset()
-    if sub_df:
-        ai_df = ai_df.sample(frac=FRAC)
+
+    if hsd_merged:
+        print("Using HSD Merged dataset")
+        df = load_hsd_dataset()
+    else:
+        print("Using binary dataset")
+        df = create_binary_dataset()
+        if sub_df:
+            print(f"Using {FRAC*100}% of binary dataset")
+            df = ai_df.sample(frac=FRAC)
 
     print("Creating PyTorch dataset")
     text_ds = create_text_classification_dataset(
-        ai_df, tokenizer_name=pretrained_model_name, max_len=MAX_LEN
+        df, tokenizer_name=pretrained_model_name, max_len=MAX_LEN
     )
 
     print("Creating data loader")
@@ -306,7 +351,7 @@ def main(sub_df=False):
     # TensorBoard writer
     writer = SummaryWriter(log_dir=LOG_DIR)
 
-    print("Starting training loop")
+    print(f"Starting training loop with patience: {PATIENCE}")
     best_f1 = 0.0
     for epoch in range(1, EPOCHS + 1):
         train_loss, train_acc, train_f1score = train_model(
@@ -329,7 +374,7 @@ def main(sub_df=False):
                 model, optimizer, epoch, train_f1score, best_f1, save_dir=CHECKPOINT_DIR
             )
 
-        if train_f1score > best_f1:
+        if train_f1score >= best_f1:
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
@@ -342,4 +387,4 @@ def main(sub_df=False):
 
 
 if __name__ == "__main__":
-    main(sub_df=False)
+    main(sub_df=False, hsd_merged=True)
