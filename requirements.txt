@@ -1,0 +1,17 @@
+jupyter
+ipykernel
+datasets
+wget
+coverage
+pytest
+mypy
+ruff
+bandit
+pytest-cov
+pytest-xdist
+invoke
+toxigen
+pre-commit
+transformers
+sklearn
+tensorboard
