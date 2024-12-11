@@ -13,5 +13,5 @@ invoke
 toxigen
 pre-commit
 transformers
-sklearn
+scikit-learn
 tensorboard

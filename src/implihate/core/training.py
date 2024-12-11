@@ -128,7 +128,7 @@ def f1_score_metric(y_true, y_pred, average="weighted"):
 
 
 # Training loop
-def train_model(model, data_loader, optimizer, criterion, device):
+def train_model(model, data_loader, optimizer, criterion, gpu_id=4):
     """Training loop for a PyTorch model, including accuracy and F1 score computation.
 
     Args:
@@ -141,6 +141,7 @@ def train_model(model, data_loader, optimizer, criterion, device):
     Returns:
         tuple: Average loss, accuracy, and F1 score for the epoch.
     """
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.train()
 
@@ -273,7 +274,7 @@ def main(sub_df=False):
     NUM_CLASSES = 2
     CHECKPOINT_DIR = "checkpoints"
     LOG_DIR = "logs"
-
+    GPU_ID = 4
     model = CustomHateBERTModel(pretrained_model_name, NUM_CLASSES)
 
     # Loss function and optimizer
@@ -294,7 +295,8 @@ def main(sub_df=False):
     data_loader = DataLoader(text_ds, batch_size=BATCH_SIZE, shuffle=True)
 
     # Training configuration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     model.to(device)
 
     # TensorBoard writer
@@ -304,7 +306,7 @@ def main(sub_df=False):
     best_f1 = 0.0
     for epoch in range(1, EPOCHS + 1):
         train_loss, train_acc, train_f1score = train_model(
-            model, data_loader, optimizer, criterion, device
+            model, data_loader, optimizer, criterion, GPU_ID
         )
         print(f"Epoch {epoch}/{EPOCHS}")
         print(
@@ -328,4 +330,4 @@ def main(sub_df=False):
 
 
 if __name__ == "__main__":
-    main(sub_df=True)
+    main(sub_df=False)
