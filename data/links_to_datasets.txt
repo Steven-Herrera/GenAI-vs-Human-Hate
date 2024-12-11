@@ -1,0 +1,23 @@
+# MegaSpeech
+https://github.com/tomerwul/MegaSpeech?tab=readme-ov-file
+
+# HateXplain
+https://github.com/hate-alert/HateXplain
+
+# TOXIGEN
+https://github.com/microsoft/TOXIGEN
+
+# Dynamically Generated Hate Speech
+https://github.com/bvidgen/Dynamically-Generated-Hate-Speech-Dataset
+
+# Social Bias Frames
+https://maartensap.com/social-bias-frames/
+
+# Implicit Hate Speech
+https://github.com/SALT-NLP/implicit-hate
+
+# EMNLP
+https://drive.google.com/drive/folders/1bKf8PQuuOk7z3ehgAcmTLjmK5Cb86ZTz
+
+# TalkDown
+https://github.com/zijwang/talkdown

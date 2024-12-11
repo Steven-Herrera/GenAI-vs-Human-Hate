@@ -16,6 +16,7 @@ pre-commit = "^4.0.1"
 
 [tool.poetry.group.dev.dependencies]
 invoke = "^2.2.0"
+toxigen = "^1.1.0"
 
 
 [tool.poetry.group.checks.dependencies]
@@ -26,6 +27,16 @@ ruff = "^0.7.1"
 bandit = "^1.7.10"
 pytest-cov = "^6.0.0"
 pytest-xdist = "^3.6.1"
+
+
+[tool.poetry.group.data.dependencies]
+datasets = "^3.1.0"
+wget = "^3.2"
+
+
+[tool.poetry.group.notebooks.dependencies]
+jupyter = "^1.1.1"
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]
