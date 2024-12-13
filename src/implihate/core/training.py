@@ -1,41 +1,18 @@
 """Train HateBERT"""
 
 import os
+import mlflow
+import mlflow.pytorch
 from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
-
 from datasets import load_dataset
-
 import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer, AutoModel
-from sklearn.metrics import f1_score
-
-
-def save_checkpoint(
-    model, optimizer, epoch, f1_score, best_f1, save_dir="checkpoints", filename=None
-):
-    """Saves a model checkpoint if F1-score improves."""
-    if f1_score > best_f1:
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        if filename is None:
-            filename = f"model_best_epoch_{epoch}.pt"
-        save_path = os.path.join(save_dir, filename)
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "f1_score": f1_score,
-            },
-            save_path,
-        )
-        print(f"Improved F1-Score! Checkpoint saved at: {save_path}")
-        return f1_score  # Update best F1-score
-    return best_f1
+from sklearn.metrics import f1_score, accuracy_score
+from sklearn.model_selection import train_test_split
 
 
 def create_binary_dataset():
@@ -106,73 +83,114 @@ class CustomHateBERTModel(nn.Module):
         return logits
 
 
-# Metric: Accuracy function
-def accuracy(preds, labels):
-    _, predictions = torch.max(preds, dim=1)
-    return (predictions == labels).sum().item() / labels.size(0)
+# Save checkpoint function
+def save_checkpoint(
+    model,
+    optimizer,
+    epoch,
+    val_f1,
+    best_f1,
+    save_dir="checkpoints",
+    model_name="model",
+    filename=None,
+):
+    if val_f1 > best_f1:
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        if filename is None:
+            filename = f"{model_name}_best_epoch_{epoch}.pt"
+        save_path = os.path.join(save_dir, filename)
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_f1": val_f1,
+            },
+            save_path,
+        )
+        print(f"Improved F1-Score! Checkpoint saved at: {save_path}")
+        return val_f1
+    return best_f1
 
 
-def f1_score_metric(y_true, y_pred, average="weighted"):
-    """Calculates the F1 score for predictions and true labels.
+# Early stopping function
+def early_stopping(epochs_without_improvement, patience):
+    return epochs_without_improvement > patience
 
-    Args:
-        y_true (torch.Tensor): True labels.
-        y_pred (torch.Tensor): Predicted probabilities or logits.
 
-    Returns:
-        float: The F1 score.
-    """
+# Metric: F1 score
+def f1_score_metric(y_true, y_pred):
     y_pred_classes = torch.argmax(y_pred, dim=1).cpu().numpy()
     y_true = y_true.cpu().numpy()
-    return f1_score(y_true, y_pred_classes, average=average)
+    return f1_score(y_true, y_pred_classes, average="macro")
 
 
-# Training loop
-def train_model(model, data_loader, optimizer, criterion, gpu_id=4):
-    """Training loop for a PyTorch model, including accuracy and F1 score computation.
+# Dataset class
+class TextClassificationDataset(Dataset):
+    def __init__(self, texts, labels, tokenizer, max_len):
+        self.texts = texts
+        self.labels = labels
+        self.tokenizer = tokenizer
+        self.max_len = max_len
 
-    Args:
-        model (torch.nn.Module): The PyTorch model to train.
-        data_loader (torch.utils.data.DataLoader): DataLoader for the training dataset.
-        optimizer (torch.optim.Optimizer): Optimizer for training.
-        criterion (torch.nn.Module): Loss function.
-        device (torch.device): Device to train on (CPU or GPU).
+    def __len__(self):
+        return len(self.texts)
 
-    Returns:
-        tuple: Average loss, accuracy, and F1 score for the epoch.
-    """
-    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    def __getitem__(self, idx):
+        text = self.texts[idx]
+        label = self.labels[idx]
+        encoding = self.tokenizer(
+            text,
+            max_length=self.max_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        return {
+            "input_ids": encoding["input_ids"].squeeze(0),
+            "attention_mask": encoding["attention_mask"].squeeze(0),
+            "label": torch.tensor(label, dtype=torch.long),
+        }
+
+
+# Create dataset function
+def create_text_classification_dataset(df, tokenizer_name, max_len, train_size=0.8):
+    texts = df.iloc[:, 0].tolist()
+    labels = df.iloc[:, 1].tolist()
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    train_texts, val_texts, train_labels, val_labels = train_test_split(
+        texts, labels, train_size=train_size, stratify=labels
+    )
+
+    train_dataset = TextClassificationDataset(
+        train_texts, train_labels, tokenizer, max_len
+    )
+    val_dataset = TextClassificationDataset(val_texts, val_labels, tokenizer, max_len)
+
+    return train_dataset, val_dataset
+
+
+# Train model function
+def train_model(model, data_loader, optimizer, criterion, device):
     model.train()
-
-    total_loss = 0
-    total_acc = 0
-    total_f1 = 0
+    total_loss, total_acc, total_f1 = 0, 0, 0
 
     for batch in data_loader:
         input_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
         labels = batch["label"].to(device)
 
-        # Forward pass
-        outputs = model(input_ids, attention_mask)
-
-        # Compute loss
-        loss = criterion(outputs, labels)
-        total_loss += loss.item()
-
-        # Backward pass
         optimizer.zero_grad()
+        outputs = model(input_ids, attention_mask)
+        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
 
-        # Compute accuracy
-        acc = (torch.argmax(outputs, dim=1) == labels).sum().item() / labels.size(0)
-        total_acc += acc
-
-        # Compute F1 score
-        f1 = f1_score_metric(labels, outputs)
-        total_f1 += f1
+        total_loss += loss.item()
+        total_acc += accuracy_score(labels.cpu(), torch.argmax(outputs, dim=1).cpu())
+        total_f1 += f1_score_metric(labels, outputs)
 
     return (
         total_loss / len(data_loader),
@@ -181,165 +199,174 @@ def train_model(model, data_loader, optimizer, criterion, gpu_id=4):
     )
 
 
-class TextClassificationDataset(Dataset):
-    """PyTorch Dataset for text classification using a Hugging Face tokenizer.
+# Validate model function
+def validate_model(model, data_loader, criterion, device):
+    model.eval()
+    total_loss, total_acc, total_f1 = 0, 0, 0
 
-    Attributes:
-        texts (list): A list of input text strings.
-        labels (list): A list of integer labels corresponding to the input texts.
-        tokenizer (AutoTokenizer): Tokenizer from the Hugging Face Transformers library.
-        max_len (int): Maximum length of tokenized input sequences.
-    """
+    with torch.no_grad():
+        for batch in data_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["label"].to(device)
 
-    def __init__(self, texts, labels, tokenizer, max_len):
-        """Initializes the dataset.
+            outputs = model(input_ids, attention_mask)
+            loss = criterion(outputs, labels)
 
-        Args:
-            texts (list): A list of strings containing the input texts.
-            labels (list): A list of strings or integers containing the labels.
-            tokenizer (AutoTokenizer): Tokenizer from the Hugging Face Transformers library.
-            max_len (int): Maximum length of tokenized input sequences.
-        """
-        self.texts = texts
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_len = max_len
+            total_loss += loss.item()
+            total_acc += accuracy_score(
+                labels.cpu(), torch.argmax(outputs, dim=1).cpu()
+            )
+            total_f1 += f1_score_metric(labels, outputs)
 
-    def __len__(self):
-        """Returns the number of samples in the dataset."""
-        return len(self.texts)
-
-    def __getitem__(self, idx):
-        """Fetches a single data point at the given index.
-
-        Args:
-            idx (int): Index of the data point to fetch.
-
-        Returns:
-            dict: A dictionary containing input IDs, attention masks, and the label.
-        """
-        text = self.texts[idx]
-        label = self.labels[idx]
-
-        # Tokenize the text
-        encoding = self.tokenizer(
-            text,
-            max_length=self.max_len,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-
-        return {
-            "input_ids": encoding["input_ids"].squeeze(0),
-            "attention_mask": encoding["attention_mask"].squeeze(0),
-            "label": torch.tensor(label, dtype=torch.long),
-        }
+    return (
+        total_loss / len(data_loader),
+        total_acc / len(data_loader),
+        total_f1 / len(data_loader),
+    )
 
 
-def create_text_classification_dataset(df, tokenizer_name, max_len):
-    """Creates a PyTorch dataset from a pandas dataframe for text classification.
+def _hsd_label_to_int(label):
+    """Converts the labels found in the HSD_final_merged dataset into integers for training a model
 
     Args:
-        df (pd.DataFrame): DataFrame containing two columns: the first column has the text, and the second column has the labels.
-        label_mapping (dict): A dictionary mapping string labels to integer class indices.
-        tokenizer_name (str): Name of the pre-trained tokenizer (e.g., "GroNLP/hateBERT").
-        max_len (int): Maximum length of tokenized input sequences.
+        label (str): Either Human or AI
 
     Returns:
-        TextClassificationDataset: A PyTorch dataset ready for training.
+        integer_label (int): 0 for human and 1 for AI
+
+    Raises:
+        ValueError: Label isn't Human or AI
     """
-
-    # Extract texts and map string labels to integers
-    texts = df.iloc[:, 0].tolist()
-    labels = df.iloc[:, 1].tolist()
-
-    # Initialize tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-    # Create and return the dataset
-    return TextClassificationDataset(texts, labels, tokenizer, max_len)
+    if "Human":
+        integer_label = 0
+    elif "AI":
+        integer_label = 1
+    else:
+        raise ValueError(f"label should be Human or AI. Got: {label}")
+    return integer_label
 
 
-def main(sub_df=False):
-    """Train a binary model with checkpointing and metrics logging."""
+def load_hsd_dataset():
+    """Load Yueru's version of the merged datasets
+
+    Returns:
+        hsd_df (pd.DataFrame): A dataframe with the texts and labels
+
+    Raises:
+        AssertionError: hsd_df columns are not exactly text and label
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv("../../../data/HSD_final_merged.csv")
+    df["Label"] = df["Label"].apply(lambda x: _hsd_label_to_int(x))
+    df = df.rename(columns={"Label": "label"})
+    hsd_df = df[cols]
+    hsd_cols = list(hsd_df.columns)
+    assert hsd_cols == cols, hsd_cols
+    return hsd_df
+
+
+# Main function
+def main():
     # Configurations
-    FRAC = 0.005
     MAX_LEN = 128
     LEARNING_RATE = 0.001
-    BATCH_SIZE = 2
+    BATCH_SIZE = 32
     EPOCHS = 10
-    CHECKPOINT_INTERVAL = 2  # Save checkpoint every 2 epochs
-    pretrained_model_name = "GroNLP/hateBERT"
+    PATIENCE = 3
+    TRAIN_SIZE = 0.8
+    PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
+    model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
     CHECKPOINT_DIR = "checkpoints"
     LOG_DIR = "logs"
     GPU_ID = 4
-    PATIENCE = 5
-    assert (
-        PATIENCE > CHECKPOINT_INTERVAL
-    ), "Checkpoint Interval must be greater than Patience"
-    model = CustomHateBERTModel(pretrained_model_name, NUM_CLASSES)
 
-    # Loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
+    # Initialize mlflow
+    mlflow.set_tracking_uri("https://dagshub.com/YOUR_USERNAME/YOUR_REPO_NAME.mlflow")
+    mlflow.set_experiment("HateBERT Training")
 
-    print("Creating dataset")
-    ai_df = create_binary_dataset()
-    if sub_df:
-        ai_df = ai_df.sample(frac=FRAC)
-
-    print("Creating PyTorch dataset")
-    text_ds = create_text_classification_dataset(
-        ai_df, tokenizer_name=pretrained_model_name, max_len=MAX_LEN
-    )
-
-    print("Creating data loader")
-    data_loader = DataLoader(text_ds, batch_size=BATCH_SIZE, shuffle=True)
-
-    # Training configuration
-    device = torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    model.to(device)
-
-    # TensorBoard writer
-    writer = SummaryWriter(log_dir=LOG_DIR)
-
-    print("Starting training loop")
-    best_f1 = 0.0
-    for epoch in range(1, EPOCHS + 1):
-        train_loss, train_acc, train_f1score = train_model(
-            model, data_loader, optimizer, criterion, GPU_ID
-        )
-        print(f"Epoch {epoch}/{EPOCHS}")
-        print(
-            f"Loss: {train_loss:.4f}, Accuracy: {train_acc:.4f}, F1-Score: {train_f1score:.4f}"
+    with mlflow.start_run():
+        # Load data
+        df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
+        train_dataset, val_dataset = create_text_classification_dataset(
+            df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE
         )
 
-        # Log metrics to TensorBoard
-        writer.add_scalar("Loss/train", train_loss, epoch)
-        writer.add_scalar("Accuracy/train", train_acc, epoch)
-        writer.add_scalar("F1-Score/train", train_f1score, epoch)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-        # Save checkpoints every CHECKPOINT_INTERVAL epochs
-        if epoch % CHECKPOINT_INTERVAL == 0:
-            # save_checkpoint(model, optimizer, epoch, save_dir=CHECKPOINT_DIR)
-            best_f1 = save_checkpoint(
-                model, optimizer, epoch, train_f1score, best_f1, save_dir=CHECKPOINT_DIR
+        # Initialize model, optimizer, and loss function
+        model = CustomHateBERTModel(PRETRAINED_MODEL_NAME, NUM_CLASSES)
+        optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
+        criterion = nn.CrossEntropyLoss()
+
+        device = torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+
+        # TensorBoard writer
+        writer = SummaryWriter(log_dir=f"{model_name}_{LOG_DIR}")
+
+        best_f1 = 0
+        epochs_without_improvement = 0
+
+        for epoch in range(1, EPOCHS + 1):
+            train_loss, train_acc, train_f1 = train_model(
+                model, train_loader, optimizer, criterion, device
+            )
+            val_loss, val_acc, val_f1 = validate_model(
+                model, val_loader, criterion, device
             )
 
-        if train_f1score > best_f1:
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
+            print(f"Epoch {epoch}/{EPOCHS}")
+            print(
+                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Train F1: {train_f1:.4f}"
+            )
+            print(
+                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val F1: {val_f1:.4f}"
+            )
 
-        if epochs_without_improvement > PATIENCE:
-            break
+            # Log metrics
+            writer.add_scalar("Loss/train", train_loss, epoch)
+            writer.add_scalar("Accuracy/train", train_acc, epoch)
+            writer.add_scalar("F1/train", train_f1, epoch)
+            writer.add_scalar("Loss/val", val_loss, epoch)
+            writer.add_scalar("Accuracy/val", val_acc, epoch)
+            writer.add_scalar("F1/val", val_f1, epoch)
 
-    # Close TensorBoard writer
-    writer.close()
+            mlflow.log_metric("train_loss", train_loss, step=epoch)
+            mlflow.log_metric("train_accuracy", train_acc, step=epoch)
+            mlflow.log_metric("train_f1", train_f1, step=epoch)
+            mlflow.log_metric("val_loss", val_loss, step=epoch)
+            mlflow.log_metric("val_accuracy", val_acc, step=epoch)
+            mlflow.log_metric("val_f1", val_f1, step=epoch)
 
+            # Save checkpoint
+            best_f1 = save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                val_f1,
+                best_f1,
+                CHECKPOINT_DIR,
+                model_name=model_name,
+            )
 
-if __name__ == "__main__":
-    main(sub_df=False)
+            # Early stopping
+            if val_f1 > best_f1:
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+
+            if early_stopping(epochs_without_improvement, PATIENCE):
+                print("Early stopping triggered.")
+                break
+
+        # Log hyperparameters
+        mlflow.log_param("epochs", EPOCHS)
+        mlflow.log_param("batch_size", BATCH_SIZE)
+        mlflow.log_param("model name", PRETRAINED_MODEL_NAME)
+        mlflow.log_param("patience", PATIENCE)
+        mlflow.log_param("Learning Rate", LEARNING_RATE)
+        mlflow.log_param("Max len", MAX_LEN)
+        mlflow.log_param("Train size", TRAIN_SIZE)
