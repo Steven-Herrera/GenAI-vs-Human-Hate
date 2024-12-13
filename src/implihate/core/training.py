@@ -278,8 +278,8 @@ def main():
     PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
-    CHECKPOINT_DIR = "checkpoints"
-    LOG_DIR = "logs"
+    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_2"
+    LOG_DIR = f"logs_hsd_{model_name}_2"
     GPU_ID = 4
 
     # Initialize mlflow
