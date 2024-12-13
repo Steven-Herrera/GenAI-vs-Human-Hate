@@ -149,7 +149,7 @@ def accuracy(preds, labels):
     return (predictions == labels).sum().item() / labels.size(0)
 
 
-def f1_score_metric(y_true, y_pred, average="binary"):
+def f1_score_metric(y_true, y_pred, average="macro"):
     """Calculates the F1 score for predictions and true labels.
 
     Args:
@@ -305,15 +305,16 @@ def main(sub_df=False, hsd_merged=False):
     MAX_LEN = 128
     LEARNING_RATE = 0.001
     BATCH_SIZE = 2
-    EPOCHS = 15
+    EPOCHS = 5
     CHECKPOINT_INTERVAL = 1  # Save checkpoint every 2 epochs
     pretrained_model_name = "GroNLP/hateBERT"
     model_name = pretrained_model_name.split("/")[-1]
     NUM_CLASSES = 2
-    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}"
-    LOG_DIR = f"logs_hsd_{model_name}"
+    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_2"
+    LOG_DIR = f"logs_hsd_{model_name}_2"
     GPU_ID = 4
-    PATIENCE = 5
+    PATIENCE = 3
+    
     assert (
         PATIENCE > CHECKPOINT_INTERVAL
     ), "Checkpoint Interval must be greater than Patience"
@@ -374,7 +375,7 @@ def main(sub_df=False, hsd_merged=False):
                 model, optimizer, epoch, train_f1score, best_f1, save_dir=CHECKPOINT_DIR
             )
 
-        if train_f1score >= best_f1:
+        if (train_f1score < best_f1) or (epoch == 1):
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
