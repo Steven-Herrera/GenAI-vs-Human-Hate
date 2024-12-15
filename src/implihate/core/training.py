@@ -21,6 +21,7 @@ import seaborn as sns
 # metrics to the DagsHub server
 load_dotenv()
 
+
 def create_binary_dataset():
     """Imports the Implicit Hate and Toxigen datasets. Labels all Implicit Hate data as 0 for
     human generated and all data from Toxigen as 1 for AI generated. Only the implicit hate
@@ -161,10 +162,16 @@ class TextClassificationDataset(Dataset):
 
 
 # Create dataset function
-def create_text_classification_dataset(df, tokenizer_name, max_len, train_size=0.6, val_size=.2):
+def create_text_classification_dataset(
+    df, tokenizer_name, max_len, train_size=0.6, val_size=0.2
+):
     texts = df.iloc[:, 0].tolist()
     labels = df.iloc[:, 1].tolist()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    max_len = tokenizer.model_max_length
+    print()
+    print(f"using max length: {max_len}")
+    print()
     if train_size + val_size >= 1.0:
         raise ValueError("The sum of train_size and val_size must be less than 1.0")
 
@@ -175,14 +182,19 @@ def create_text_classification_dataset(df, tokenizer_name, max_len, train_size=0
     )
 
     val_texts, test_texts, val_labels, test_labels = train_test_split(
-        remaining_texts, remaining_labels, train_size=val_size / (val_size + test_size), stratify=remaining_labels
+        remaining_texts,
+        remaining_labels,
+        train_size=val_size / (val_size + test_size),
+        stratify=remaining_labels,
     )
 
     train_dataset = TextClassificationDataset(
         train_texts, train_labels, tokenizer, max_len
     )
     val_dataset = TextClassificationDataset(val_texts, val_labels, tokenizer, max_len)
-    test_dataset = TextClassificationDataset(test_texts, test_labels, tokenizer, max_len)
+    test_dataset = TextClassificationDataset(
+        test_texts, test_labels, tokenizer, max_len
+    )
 
     return train_dataset, val_dataset, test_dataset
 
@@ -240,15 +252,15 @@ def validate_model(model, data_loader, criterion, device):
         total_f1 / len(data_loader),
     )
 
+
 def model_preds(model, data_loader, device):
     model.eval()
 
     y_preds = []
     with torch.no_grad():
         for batch in data_loader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['label'].to(device)
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
 
             y_pred = model(input_ids, attention_mask)
             y_pred = torch.argmax(y_pred, dim=1).cpu()
@@ -297,6 +309,7 @@ def load_hsd_dataset():
     assert hsd_cols == cols, hsd_cols
     return hsd_df
 
+
 def lst_to_df(texts, labels, filepath):
     """Creates a pandas dataframe from two lists
 
@@ -313,17 +326,17 @@ def lst_to_df(texts, labels, filepath):
     df.to_csv(filepath, index=False)
     return df
 
+
 # Main function
 def main():
-
     # Configurations
     MAX_LEN = 128
-    LEARNING_RATE = 0.001
-    BATCH_SIZE = 32
-    EPOCHS = 15
+    LEARNING_RATE = 1e-5
+    BATCH_SIZE = 16
+    EPOCHS = 30
     PATIENCE = 5
     TRAIN_SIZE = 0.6
-    VAL_SIZE = .2
+    VAL_SIZE = 0.2
     PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
@@ -333,7 +346,9 @@ def main():
 
     print("Setting up mlflow")
     # Initialize mlflow
-    mlflow.set_tracking_uri("https://dagshub.com/Steven-Herrera/GenAI-vs-Human-Hate.mlflow")
+    mlflow.set_tracking_uri(
+        "https://dagshub.com/Steven-Herrera/GenAI-vs-Human-Hate.mlflow"
+    )
     mlflow.set_experiment("HateBERT Training")
 
     with mlflow.start_run():
@@ -345,9 +360,11 @@ def main():
             df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE, VAL_SIZE
         )
 
-        train_df = lst_to_df(train_dataset.texts, train_dataset.labels, f"{model_name}_train.csv")
-        val_df = lst_to_df(val_dataset.texts, val_dataset.labels, f"{model_name}_val.csv")
-        test_df = lst_to_df(test_dataset.texts, test_dataset.labels, f"{model_name}_test.csv")
+        _ = lst_to_df(
+            train_dataset.texts, train_dataset.labels, f"{model_name}_train.csv"
+        )
+        _ = lst_to_df(val_dataset.texts, val_dataset.labels, f"{model_name}_val.csv")
+        _ = lst_to_df(test_dataset.texts, test_dataset.labels, f"{model_name}_test.csv")
 
         mlflow.log_artifact(f"{model_name}_train.csv", "train_datasets")
         mlflow.log_artifact(f"{model_name}_val.csv", "val_datasets")
@@ -357,7 +374,7 @@ def main():
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    
+
         print("Instantiating model")
         # Initialize model, optimizer, and loss function
         model = CustomHateBERTModel(PRETRAINED_MODEL_NAME, NUM_CLASSES)
@@ -434,22 +451,26 @@ def main():
         mlflow.log_param("Max len", MAX_LEN)
         mlflow.log_param("Train size", TRAIN_SIZE)
 
-        test_loss, test_acc, test_f1 = validate_model(model, test_loader, criterion, device)
+        test_loss, test_acc, test_f1 = validate_model(
+            model, test_loader, criterion, device
+        )
 
-        print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}, Test F1-Score: {test_f1:.4f}")
-        
+        print(
+            f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}, Test F1-Score: {test_f1:.4f}"
+        )
+
         writer.add_scalar("test_loss", test_loss)
         writer.add_scalar("test_accuracy", test_acc)
         writer.add_scalar("test_f1", test_f1)
         mlflow.log_metric("test_loss", test_loss)
         mlflow.log_metric("test_accuracy", test_acc)
         mlflow.log_metric("test_f1", test_f1)
-        
+
         y_pred = model_preds(model, test_loader, device)
         y_true = test_dataset.labels
         test_cm = confusion_matrix(y_true, y_pred)
 
-        plt.figure(figsize=(8,6))
+        plt.figure(figsize=(8, 6))
         sns.heatmap(test_cm, annot=True, fmt="d")
         plt.xlabel("Predicted Label")
         plt.ylabel("True Label")
