@@ -1,6 +1,7 @@
 """Train HateBERT"""
 
 import os
+from dotenv import load_dotenv
 import mlflow
 import mlflow.pytorch
 from torch.utils.tensorboard import SummaryWriter
@@ -11,9 +12,14 @@ from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer, AutoModel
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+# loads environment variables from a .env file to allow mlflow to send
+# metrics to the DagsHub server
+load_dotenv()
 
 def create_binary_dataset():
     """Imports the Implicit Hate and Toxigen datasets. Labels all Implicit Hate data as 0 for
@@ -155,21 +161,30 @@ class TextClassificationDataset(Dataset):
 
 
 # Create dataset function
-def create_text_classification_dataset(df, tokenizer_name, max_len, train_size=0.8):
+def create_text_classification_dataset(df, tokenizer_name, max_len, train_size=0.6, val_size=.2):
     texts = df.iloc[:, 0].tolist()
     labels = df.iloc[:, 1].tolist()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    if train_size + val_size >= 1.0:
+        raise ValueError("The sum of train_size and val_size must be less than 1.0")
 
-    train_texts, val_texts, train_labels, val_labels = train_test_split(
+    test_size = 1.0 - (train_size + val_size)
+
+    train_texts, remaining_texts, train_labels, remaining_labels = train_test_split(
         texts, labels, train_size=train_size, stratify=labels
+    )
+
+    val_texts, test_texts, val_labels, test_labels = train_test_split(
+        remaining_texts, remaining_labels, train_size=val_size / (val_size + test_size), stratify=remaining_labels
     )
 
     train_dataset = TextClassificationDataset(
         train_texts, train_labels, tokenizer, max_len
     )
     val_dataset = TextClassificationDataset(val_texts, val_labels, tokenizer, max_len)
+    test_dataset = TextClassificationDataset(test_texts, test_labels, tokenizer, max_len)
 
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, test_dataset
 
 
 # Train model function
@@ -225,6 +240,23 @@ def validate_model(model, data_loader, criterion, device):
         total_f1 / len(data_loader),
     )
 
+def model_preds(model, data_loader, device):
+    model.eval()
+
+    y_preds = []
+    with torch.no_grad():
+        for batch in data_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['label'].to(device)
+
+            y_pred = model(input_ids, attention_mask)
+            y_pred = torch.argmax(y_pred, dim=1).cpu()
+
+            y_preds.extend(y_pred.numpy().tolist())
+
+    return y_preds
+
 
 def _hsd_label_to_int(label):
     """Converts the labels found in the HSD_final_merged dataset into integers for training a model
@@ -238,9 +270,9 @@ def _hsd_label_to_int(label):
     Raises:
         ValueError: Label isn't Human or AI
     """
-    if "Human":
+    if label == "Human":
         integer_label = 0
-    elif "AI":
+    elif label == "AI":
         integer_label = 1
     else:
         raise ValueError(f"label should be Human or AI. Got: {label}")
@@ -265,37 +297,68 @@ def load_hsd_dataset():
     assert hsd_cols == cols, hsd_cols
     return hsd_df
 
+def lst_to_df(texts, labels, filepath):
+    """Creates a pandas dataframe from two lists
+
+    Args:
+        texts (List[str]): Text
+        labels (List[int]): Labels
+        filepath (str): filepath to save csv
+
+    Returns:
+        df (pd.DataFrame): Pandas dataframe
+    """
+    data = {"text": texts, "label": labels}
+    df = pd.DataFrame(data)
+    df.to_csv(filepath, index=False)
+    return df
 
 # Main function
 def main():
+
     # Configurations
     MAX_LEN = 128
     LEARNING_RATE = 0.001
     BATCH_SIZE = 32
-    EPOCHS = 10
-    PATIENCE = 3
-    TRAIN_SIZE = 0.8
+    EPOCHS = 15
+    PATIENCE = 5
+    TRAIN_SIZE = 0.6
+    VAL_SIZE = .2
     PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
-    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_2"
-    LOG_DIR = f"logs_hsd_{model_name}_2"
+    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_0"
+    LOG_DIR = f"logs_hsd_{model_name}_0"
     GPU_ID = 4
 
+    print("Setting up mlflow")
     # Initialize mlflow
-    mlflow.set_tracking_uri("https://dagshub.com/YOUR_USERNAME/YOUR_REPO_NAME.mlflow")
+    mlflow.set_tracking_uri("https://dagshub.com/Steven-Herrera/GenAI-vs-Human-Hate.mlflow")
     mlflow.set_experiment("HateBERT Training")
 
     with mlflow.start_run():
         # Load data
+        print("loading dataset from csv")
         df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
-        train_dataset, val_dataset = create_text_classification_dataset(
-            df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE
+        print("creating train/val/test split")
+        train_dataset, val_dataset, test_dataset = create_text_classification_dataset(
+            df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE, VAL_SIZE
         )
 
+        train_df = lst_to_df(train_dataset.texts, train_dataset.labels, f"{model_name}_train.csv")
+        val_df = lst_to_df(val_dataset.texts, val_dataset.labels, f"{model_name}_val.csv")
+        test_df = lst_to_df(test_dataset.texts, test_dataset.labels, f"{model_name}_test.csv")
+
+        mlflow.log_artifact(f"{model_name}_train.csv", "train_datasets")
+        mlflow.log_artifact(f"{model_name}_val.csv", "val_datasets")
+        mlflow.log_artifact(f"{model_name}_test.csv", "test_datasets")
+
+        print(f"creating train/val/test loaders with batch size: {BATCH_SIZE}")
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
+        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    
+        print("Instantiating model")
         # Initialize model, optimizer, and loss function
         model = CustomHateBERTModel(PRETRAINED_MODEL_NAME, NUM_CLASSES)
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
@@ -310,6 +373,7 @@ def main():
         best_f1 = 0
         epochs_without_improvement = 0
 
+        print(f"Training loop with patience of {PATIENCE} epochs")
         for epoch in range(1, EPOCHS + 1):
             train_loss, train_acc, train_f1 = train_model(
                 model, train_loader, optimizer, criterion, device
@@ -341,6 +405,15 @@ def main():
             mlflow.log_metric("val_accuracy", val_acc, step=epoch)
             mlflow.log_metric("val_f1", val_f1, step=epoch)
 
+            # Early Stopping
+            if val_f1 > best_f1:
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+            if early_stopping(epochs_without_improvement, PATIENCE):
+                print("Early stopping triggered.")
+                break
+
             # Save checkpoint
             best_f1 = save_checkpoint(
                 model,
@@ -352,16 +425,6 @@ def main():
                 model_name=model_name,
             )
 
-            # Early stopping
-            if val_f1 > best_f1:
-                epochs_without_improvement = 0
-            else:
-                epochs_without_improvement += 1
-
-            if early_stopping(epochs_without_improvement, PATIENCE):
-                print("Early stopping triggered.")
-                break
-
         # Log hyperparameters
         mlflow.log_param("epochs", EPOCHS)
         mlflow.log_param("batch_size", BATCH_SIZE)
@@ -370,3 +433,30 @@ def main():
         mlflow.log_param("Learning Rate", LEARNING_RATE)
         mlflow.log_param("Max len", MAX_LEN)
         mlflow.log_param("Train size", TRAIN_SIZE)
+
+        test_loss, test_acc, test_f1 = validate_model(model, test_loader, criterion, device)
+
+        print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}, Test F1-Score: {test_f1:.4f}")
+        
+        writer.add_scalar("test_loss", test_loss)
+        writer.add_scalar("test_accuracy", test_acc)
+        writer.add_scalar("test_f1", test_f1)
+        mlflow.log_metric("test_loss", test_loss)
+        mlflow.log_metric("test_accuracy", test_acc)
+        mlflow.log_metric("test_f1", test_f1)
+        
+        y_pred = model_preds(model, test_loader, device)
+        y_true = test_dataset.labels
+        test_cm = confusion_matrix(y_true, y_pred)
+
+        plt.figure(figsize=(8,6))
+        sns.heatmap(test_cm, annot=True, fmt="d")
+        plt.xlabel("Predicted Label")
+        plt.ylabel("True Label")
+        plt.title("Confusion Matrix")
+        plt.savefig(f"{model_name}_test_cm.png")
+        mlflow.log_artifact(f"{model_name}_test_cm.png")
+
+
+if __name__ == "__main__":
+    main()
