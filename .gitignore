@@ -163,3 +163,7 @@ cython_debug/
 
 # temporarily ignore .github
 .github/
+
+data/hate_bert_hsd_*
+data/roberta_hsd_*
+notebooks/tensorboard_logs.ipynb

@@ -388,6 +388,7 @@ def main():
         writer = SummaryWriter(log_dir=f"{model_name}_{LOG_DIR}")
 
         best_f1 = 0
+        best_model_state = None
         epochs_without_improvement = 0
 
         print(f"Training loop with patience of {PATIENCE} epochs")
@@ -425,6 +426,7 @@ def main():
             # Early Stopping
             if val_f1 > best_f1:
                 epochs_without_improvement = 0
+                best_model_state = model.state_dict()
             else:
                 epochs_without_improvement += 1
             if early_stopping(epochs_without_improvement, PATIENCE):
@@ -465,6 +467,26 @@ def main():
         mlflow.log_metric("test_loss", test_loss)
         mlflow.log_metric("test_accuracy", test_acc)
         mlflow.log_metric("test_f1", test_f1)
+
+        # Log final model to DagsHub
+        print("Logging best model to MLflow")
+        model.load_state_dict(best_model_state)
+        best_model_state_path = f"{model_name}_model.pt"
+        torch.save(best_model_state, best_model_state_path)
+
+        # Infer model signature
+        example_input = next(iter(test_loader))[0].to(device)
+        mlflow.pytorch.log_model(
+            pytorch_model=model,
+            artifact_path=f"{model_name}_model",
+            conda_env=mlflow.pytorch.get_default_conda_env(),
+            input_example=example_input,
+            signature=mlflow.models.infer_signature(
+                example_input.cpu().numpy(), model(example_input).cpu().detach().numpy()
+            ),
+        )
+
+        print(f"Model {model_name}_model logged successfully!")
 
         y_pred = model_preds(model, test_loader, device)
         y_true = test_dataset.labels
