@@ -418,19 +418,66 @@ def lst_to_df(texts, labels, filepath):
     df.to_csv(filepath, index=False)
     return df
 
+def load_experiment_dataset(experiment_num, filepath="../../../data/final_hsd_1217.csv"):
+    """Loads a dataset for a specific experiment
+
+    Args:
+        experiment_num (int): Experiment ID
+
+    Returns:
+        df (pd.DataFrame): Experiment dataset
+
+    Raises:
+        ValueError: Experiment ID is not in the scope of this function
+    """
+    if experiment_num == 3:
+        df = load_experiment3_dataset(filepath=filepath)
+    elif experiment_num == 4:
+        df = load_experiment4_dataset(filepath=filepath)
+    elif experiment_num == 5:
+        df = load_experiment5_dataset(filepath=filepath)
+    else:
+        raise ValueError(f"Expected 3,4,5. Got: {experiment_num}")
+
+    return df
 
 # Main function
-def main():
+def main(experiment_num=3):
+    """
+    Runs one of six experiments
+
+    Experiment 1:
+    Human Nonhate with human hate
+
+    Experiment 2:
+    Human Nonhate with AI Hate
+
+    Experiment 3:
+    AI Nonhate with AI Hate
+
+    Experiment 4:
+    AI Nonhate with human hate
+
+    Experiment 5:
+    AI Nonhate with both AI/human hate
+
+    Experiment 6:
+    Human nonhate with both AI/human hate
+
+
+    Args:
+        experiment_num (int): The experiment number
+    """
     # Configurations
-    ITER_NUM = 0
+    ITER_NUM = 1
     MAX_LEN = 512
     LEARNING_RATE = 1e-5
     BATCH_SIZE = 16
     EPOCHS = 30
     PATIENCE = 5
-    TRAIN_SIZE = 0.6
+    TRAIN_SIZE = 0.7
     VAL_SIZE = .2
-    PRETRAINED_MODEL_NAME = "tomh/toxigen_roberta"
+    PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
     CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_{ITER_NUM}"
@@ -446,9 +493,11 @@ def main():
     mlflow.set_experiment("HateBERT Training")
 
     with mlflow.start_run():
+        mlflow.set_tag("Experiment ID", f"{experiment_num}")
         # Load data
-        print("loading dataset from csv")
-        df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
+        print(f"loading experiment {experiment_num} dataset from csv")
+        #df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
+        df = load_experiment_dataset(experiment_num)
         print("creating train/val/test split")
         train_dataset, val_dataset, test_dataset = create_text_classification_dataset(
             df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE, VAL_SIZE
@@ -479,7 +528,7 @@ def main():
         model.to(device)
 
         # TensorBoard writer
-        writer = SummaryWriter(log_dir=f"{model_name}_{LOG_DIR}")
+        writer = SummaryWriter(log_dir=f"{model_name}_experiment_{experiment_num}_{LOG_DIR}")
 
         best_f1 = 0
         best_model_state = None
@@ -569,14 +618,20 @@ def main():
         torch.save(best_model_state, best_model_state_path)
 
         # Infer model signature
-        example_input = next(iter(test_loader))[0].to(device)
+        #example_input = next(iter(test_loader))[0].to(device)
+        batch = next(iter(test_loader))
+        example_input = {
+            "input_ids": batch["input_ids"].to(device),
+            "attention_mask": batch["attention_mask"].to(device),
+        }
+
         mlflow.pytorch.log_model(
             pytorch_model=model,
             artifact_path=f"{model_name}_model",
             conda_env=mlflow.pytorch.get_default_conda_env(),
             input_example=example_input,
             signature=mlflow.models.infer_signature(
-                example_input.cpu().numpy(), model(example_input).cpu().detach().numpy()
+                {k: v.cpu().numpy() for k, v in example_input.items()}, model(example_input['input_ids'], example_input['attention_mask']).cpu().detach().numpy()
             ),
         )
 
@@ -596,4 +651,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(experiment_num=3)
