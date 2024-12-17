@@ -595,6 +595,7 @@ def main(experiment_num=3):
         mlflow.log_param("Learning Rate", LEARNING_RATE)
         mlflow.log_param("Max len", MAX_LEN)
         mlflow.log_param("Train size", TRAIN_SIZE)
+        mlflow.log_param("Validation size", VAL_SIZE)
 
         test_loss, test_acc, test_f1 = validate_model(
             model, test_loader, criterion, device
@@ -621,8 +622,8 @@ def main(experiment_num=3):
         #example_input = next(iter(test_loader))[0].to(device)
         batch = next(iter(test_loader))
         example_input = {
-            "input_ids": batch["input_ids"].to(device),
-            "attention_mask": batch["attention_mask"].to(device),
+            "input_ids": batch["input_ids"].cpu().numpy(),
+            "attention_mask": batch["attention_mask"].cpu().numpy(),
         }
 
         mlflow.pytorch.log_model(
@@ -631,7 +632,9 @@ def main(experiment_num=3):
             conda_env=mlflow.pytorch.get_default_conda_env(),
             input_example=example_input,
             signature=mlflow.models.infer_signature(
-                {k: v.cpu().numpy() for k, v in example_input.items()}, model(example_input['input_ids'], example_input['attention_mask']).cpu().detach().numpy()
+                {k: v for k, v in example_input.items()}, 
+                model(torch.tensor(example_input['input_ids']).to(device),
+                      torch.tensor(example_input['attention_mask']).to(device)).cpu().detach().numpy()
             ),
         )
 
@@ -651,4 +654,4 @@ def main(experiment_num=3):
 
 
 if __name__ == "__main__":
-    main(experiment_num=3)
+    main(experiment_num=5)
