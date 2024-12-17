@@ -169,7 +169,7 @@ def create_text_classification_dataset(
     labels = df.iloc[:, 1].tolist()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     max_len = tokenizer.model_max_length
-    
+
     if train_size + val_size >= 1.0:
         raise ValueError("The sum of train_size and val_size must be less than 1.0")
 
@@ -308,6 +308,100 @@ def load_hsd_dataset():
     return hsd_df
 
 
+def load_experiment3_dataset(filepath="../../../data/final_hsd_1217.csv"):
+    """
+    Loads the 'final_hsd_1217.csv' dataset. This dataset contains ONLY AI non-hate, AI hate, and Human hate.
+    Experiment 3:
+        Train a model on AI non-hate and AI hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_1217.csv file
+
+    Returns:
+        df3 (pd.DataFrame): Only AI non-hate and AI hate
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    ai_nonhate_df = df[(df["Source"] == "AI") & (df["Label"] == 0)]
+    ai_hate_df = df[(df["Source"] == "AI") & (df["Label"] == 1)]
+
+    nonhate_size = ai_nonhate_df.shape[0]
+    hate_size = ai_hate_df.shape[0]
+
+    min_size = min(nonhate_size, hate_size)
+
+    ai_nonhate_df_v2 = ai_nonhate_df.head(min_size).rename(columns={"Label": "label"})
+    ai_hate_df_v2 = ai_hate_df.head(min_size).rename(columns={"Label": "label"})
+
+    df3 = pd.concat([ai_nonhate_df_v2[cols], ai_hate_df_v2[cols]])
+    return df3
+
+
+def load_experiment4_dataset(filepath="../../../data/final_hsd_1217.csv"):
+    """
+    Loads the 'final_hsd_1217.csv' dataset. This dataset contains ONLY AI non-hate, AI hate, and Human hate.
+    Experiment 4:
+        Train a model on AI non-hate and human hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_1217.csv file
+
+    Returns:
+        df4 (pd.DataFrame): Only AI non-hate and human hate
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    ai_nonhate_df = df[(df["Source"] == "AI") & (df["Label"] == 0)]
+    human_hate_df = df[(df["Source"] == "Human") & (df["Label"] == 1)]
+
+    nonhate_size = ai_nonhate_df.shape[0]
+    hate_size = human_hate_df.shape[0]
+
+    min_size = min(nonhate_size, hate_size)
+
+    ai_nonhate_df_v2 = ai_nonhate_df.head(min_size).rename(columns={"Label": "label"})
+    human_hate_df_v2 = human_hate_df.head(min_size).rename(columns={"Label": "label"})
+
+    df4 = pd.concat([ai_nonhate_df_v2[cols], human_hate_df_v2[cols]])
+    return df4
+
+
+def load_experiment5_dataset(filepath="../../../data/final_hsd_1217.csv"):
+    """
+    Loads the 'final_hsd_1217.csv' dataset. This dataset contains ONLY AI non-hate, AI hate, and Human hate.
+    The entire dataset is 50/50 hate and non-hate. Of the Hate labels, 50% are human and 50% are AI.
+
+    Experiment 5:
+        Train a model on AI non-hate and BOTH human hate and AI hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_1217.csv file
+
+    Returns:
+        df5 (pd.DataFrame): AI non-hate and AI/human hate
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    ai_nonhate_df = df[(df["Source"] == "AI") & (df["Label"] == 0)]
+    ai_hate_df = df[(df["Source"] == "AI") & (df["Label"] == 1)]
+    human_hate_df = df[(df["Source"] == "Human") & (df["Label"] == 1)]
+
+    nonhate_size = ai_nonhate_df.shape[0]
+    half_size = int(nonhate_size / 2)
+
+    ai_nonhate_df_v2 = ai_nonhate_df.rename(columns={"Label": "label"})
+    human_hate_df_v2 = human_hate_df.head(half_size).rename(columns={"Label": "label"})
+    ai_hate_df_v2 = ai_hate_df.head(half_size).rename(columns={"Label": "label"})
+
+    df5 = pd.concat(
+        [ai_nonhate_df_v2[cols], ai_hate_df_v2[cols], human_hate_df_v2[cols]]
+    )
+    return df5
+
+
 def lst_to_df(texts, labels, filepath):
     """Creates a pandas dataframe from two lists
 
@@ -388,6 +482,7 @@ def main():
         writer = SummaryWriter(log_dir=f"{model_name}_{LOG_DIR}")
 
         best_f1 = 0
+        best_model_state = None
         epochs_without_improvement = 0
 
         print(f"Training loop with patience of {PATIENCE} epochs")
@@ -425,6 +520,7 @@ def main():
             # Early Stopping
             if val_f1 > best_f1:
                 epochs_without_improvement = 0
+                best_model_state = model.state_dict()
             else:
                 epochs_without_improvement += 1
             if early_stopping(epochs_without_improvement, PATIENCE):
@@ -465,6 +561,26 @@ def main():
         mlflow.log_metric("test_loss", test_loss)
         mlflow.log_metric("test_accuracy", test_acc)
         mlflow.log_metric("test_f1", test_f1)
+
+        # Log final model to DagsHub
+        print("Logging best model to MLflow")
+        model.load_state_dict(best_model_state)
+        best_model_state_path = f"{model_name}_model.pt"
+        torch.save(best_model_state, best_model_state_path)
+
+        # Infer model signature
+        example_input = next(iter(test_loader))[0].to(device)
+        mlflow.pytorch.log_model(
+            pytorch_model=model,
+            artifact_path=f"{model_name}_model",
+            conda_env=mlflow.pytorch.get_default_conda_env(),
+            input_example=example_input,
+            signature=mlflow.models.infer_signature(
+                example_input.cpu().numpy(), model(example_input).cpu().detach().numpy()
+            ),
+        )
+
+        print(f"Model {model_name}_model logged successfully!")
 
         y_pred = model_preds(model, test_loader, device)
         y_true = test_dataset.labels
