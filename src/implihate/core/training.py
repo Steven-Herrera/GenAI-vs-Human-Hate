@@ -169,9 +169,7 @@ def create_text_classification_dataset(
     labels = df.iloc[:, 1].tolist()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     max_len = tokenizer.model_max_length
-    print()
-    print(f"using max length: {max_len}")
-    print()
+    
     if train_size + val_size >= 1.0:
         raise ValueError("The sum of train_size and val_size must be less than 1.0")
 
@@ -330,7 +328,7 @@ def lst_to_df(texts, labels, filepath):
 # Main function
 def main():
     # Configurations
-    MAX_LEN = 128
+    MAX_LEN = 512
     LEARNING_RATE = 1e-5
     BATCH_SIZE = 16
     EPOCHS = 30
