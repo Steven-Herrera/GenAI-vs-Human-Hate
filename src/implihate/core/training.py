@@ -328,19 +328,21 @@ def lst_to_df(texts, labels, filepath):
 # Main function
 def main():
     # Configurations
+    ITER_NUM = 0
     MAX_LEN = 512
     LEARNING_RATE = 1e-5
     BATCH_SIZE = 16
     EPOCHS = 30
     PATIENCE = 5
     TRAIN_SIZE = 0.6
-    VAL_SIZE = 0.2
-    PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
+    VAL_SIZE = .2
+    PRETRAINED_MODEL_NAME = "tomh/toxigen_roberta"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
-    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_0"
-    LOG_DIR = f"logs_hsd_{model_name}_0"
+    CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_{ITER_NUM}"
+    LOG_DIR = f"logs_hsd_{model_name}_{ITER_NUM}"
     GPU_ID = 4
+    
 
     print("Setting up mlflow")
     # Initialize mlflow
