@@ -308,6 +308,69 @@ def load_hsd_dataset():
     return hsd_df
 
 
+def load_experiment1_dataset(filepath="../../../data/final_hsd_v2_1217.csv"):
+    """
+    Loads the 'final_hsd_v2_1217.csv' dataset. This dataset contains AI/human non-hate, AI/Human hate.
+    Experiment 1:
+        Human Non-Hate and Human Hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_v2_1217.csv file
+
+    Returns:
+        df1 (pd.DataFrame): Only Human non-hate and Human hate
+    """
+
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    nonhate_df = df[(df["Source"] == "Human") & (df["Label"] == 0)]
+    hate_df = df[(df["Source"] == "Human") & (df["Label"] == 1)]
+
+    nonhate_size = nonhate_df.shape[0]
+    hate_size = hate_df.shape[0]
+
+    min_size = min(nonhate_size, hate_size)
+
+    nonhate_df_v2 = nonhate_df.head(min_size).rename(columns={"Label": "label"})
+    hate_df_v2 = hate_df.head(min_size).rename(columns={"Label": "label"})
+
+    df1 = pd.concat([nonhate_df_v2[cols], hate_df_v2[cols]])
+    return df1
+
+
+def load_experiment2_dataset(filepath="../../../data/final_hsd_v2_1217.csv"):
+    """
+    Loads the 'final_hsd_v2_1217.csv' dataset. This dataset contains AI/human non-hate, AI/Human hate.
+    Experiment 2:
+        Human Non-Hate and AI Hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_v2_1217.csv file
+
+    Returns:
+        df2 (pd.DataFrame): Only Human Non-Hate and AI Hate
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    human_nonhate_df = df[(df["Source"] == "Human") & (df["Label"] == 0)]
+    ai_hate_df = df[(df["Source"] == "AI") & (df["Label"] == 1)]
+
+    hate_size = ai_hate_df.shape[0]
+    nonhate_size = human_nonhate_df.shape[0]
+
+    min_size = min(nonhate_size, hate_size)
+
+    ai_hate_df_v2 = ai_hate_df.head(min_size).rename(columns={"Label": "label"})
+    human_nonhate_df_v2 = human_nonhate_df.head(min_size).rename(
+        columns={"Label": "label"}
+    )
+
+    df2 = pd.concat([ai_hate_df_v2[cols], human_nonhate_df_v2[cols]])
+    return df2
+
+
 def load_experiment3_dataset(filepath="../../../data/final_hsd_1217.csv"):
     """
     Loads the 'final_hsd_1217.csv' dataset. This dataset contains ONLY AI non-hate, AI hate, and Human hate.
@@ -402,6 +465,40 @@ def load_experiment5_dataset(filepath="../../../data/final_hsd_1217.csv"):
     return df5
 
 
+def load_experiment6_dataset(filepath="../../../data/final_hsd_v2_1217.csv"):
+    """
+    Loads the 'final_hsd_v2_1217.csv' dataset. This dataset contains AI/human non-hate, AI/Human hate.
+    The entire dataset is 50/50 hate and non-hate. Of the Hate labels, 50% are human and 50% are AI.
+
+    Experiment 6:
+        Train a model on Human non-hate and BOTH human hate and AI hate
+
+    Args:
+        filepath (str): Filepath to the final_hsd_v2_1217.csv file
+
+    Returns:
+        df6 (pd.DataFrame): Human non-hate and AI/human hate
+    """
+    cols = ["text", "label"]
+    df = pd.read_csv(filepath)
+
+    human_nonhate_df = df[(df["Source"] == "Human") & (df["Label"] == 0)]
+    ai_hate_df = df[(df["Source"] == "AI") & (df["Label"] == 1)]
+    human_hate_df = df[(df["Source"] == "Human") & (df["Label"] == 1)]
+
+    nonhate_size = human_nonhate_df.shape[0]
+    half_size = int(nonhate_size / 2)
+
+    human_nonhate_df_v2 = human_nonhate_df.rename(columns={"Label": "label"})
+    human_hate_df_v2 = human_hate_df.head(half_size).rename(columns={"Label": "label"})
+    ai_hate_df_v2 = ai_hate_df.head(half_size).rename(columns={"Label": "label"})
+
+    df6 = pd.concat(
+        [human_nonhate_df_v2[cols], ai_hate_df_v2[cols], human_hate_df_v2[cols]]
+    )
+    return df6
+
+
 def lst_to_df(texts, labels, filepath):
     """Creates a pandas dataframe from two lists
 
@@ -418,7 +515,10 @@ def lst_to_df(texts, labels, filepath):
     df.to_csv(filepath, index=False)
     return df
 
-def load_experiment_dataset(experiment_num, filepath="../../../data/final_hsd_1217.csv"):
+
+def load_experiment_dataset(
+    experiment_num, filepath="../../../data/final_hsd_1217.csv"
+):
     """Loads a dataset for a specific experiment
 
     Args:
@@ -430,16 +530,26 @@ def load_experiment_dataset(experiment_num, filepath="../../../data/final_hsd_12
     Raises:
         ValueError: Experiment ID is not in the scope of this function
     """
-    if experiment_num == 3:
+    if experiment_num == 1:
+        assert filepath == "../../../data/final_hsd_v2_1217.csv", filepath
+        df = load_experiment1_dataset(filepath=filepath)
+    elif experiment_num == 2:
+        assert filepath == "../../../data/final_hsd_v2_1217.csv", filepath
+        df = load_experiment2_dataset(filepath=filepath)
+    elif experiment_num == 3:
         df = load_experiment3_dataset(filepath=filepath)
     elif experiment_num == 4:
         df = load_experiment4_dataset(filepath=filepath)
     elif experiment_num == 5:
         df = load_experiment5_dataset(filepath=filepath)
+    elif experiment_num == 6:
+        assert filepath == "../../../data/final_hsd_v2_1217.csv", filepath
+        df = load_experiment6_dataset(filepath=filepath)
     else:
-        raise ValueError(f"Expected 3,4,5. Got: {experiment_num}")
+        raise ValueError(f"Expected 1,2,3,4,5, or 6. Got: {experiment_num}")
 
     return df
+
 
 # Main function
 def main(experiment_num=3):
@@ -476,14 +586,13 @@ def main(experiment_num=3):
     EPOCHS = 30
     PATIENCE = 5
     TRAIN_SIZE = 0.7
-    VAL_SIZE = .2
+    VAL_SIZE = 0.2
     PRETRAINED_MODEL_NAME = "GroNLP/hateBERT"
     model_name = PRETRAINED_MODEL_NAME.split("/")[-1]
     NUM_CLASSES = 2
     CHECKPOINT_DIR = f"checkpoints_hsd_{model_name}_{ITER_NUM}"
     LOG_DIR = f"logs_hsd_{model_name}_{ITER_NUM}"
     GPU_ID = 4
-    
 
     print("Setting up mlflow")
     # Initialize mlflow
@@ -496,7 +605,7 @@ def main(experiment_num=3):
         mlflow.set_tag("Experiment ID", f"{experiment_num}")
         # Load data
         print(f"loading experiment {experiment_num} dataset from csv")
-        #df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
+        # df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
         df = load_experiment_dataset(experiment_num)
         print("creating train/val/test split")
         train_dataset, val_dataset, test_dataset = create_text_classification_dataset(
@@ -528,7 +637,9 @@ def main(experiment_num=3):
         model.to(device)
 
         # TensorBoard writer
-        writer = SummaryWriter(log_dir=f"{model_name}_experiment_{experiment_num}_{LOG_DIR}")
+        writer = SummaryWriter(
+            log_dir=f"{model_name}_experiment_{experiment_num}_{LOG_DIR}"
+        )
 
         best_f1 = 0
         best_model_state = None
@@ -619,7 +730,7 @@ def main(experiment_num=3):
         torch.save(best_model_state, best_model_state_path)
 
         # Infer model signature
-        #example_input = next(iter(test_loader))[0].to(device)
+        # example_input = next(iter(test_loader))[0].to(device)
         batch = next(iter(test_loader))
         example_input = {
             "input_ids": batch["input_ids"].cpu().numpy(),
@@ -632,9 +743,14 @@ def main(experiment_num=3):
             conda_env=mlflow.pytorch.get_default_conda_env(),
             input_example=example_input,
             signature=mlflow.models.infer_signature(
-                {k: v for k, v in example_input.items()}, 
-                model(torch.tensor(example_input['input_ids']).to(device),
-                      torch.tensor(example_input['attention_mask']).to(device)).cpu().detach().numpy()
+                {k: v for k, v in example_input.items()},
+                model(
+                    torch.tensor(example_input["input_ids"]).to(device),
+                    torch.tensor(example_input["attention_mask"]).to(device),
+                )
+                .cpu()
+                .detach()
+                .numpy(),
             ),
         )
 
