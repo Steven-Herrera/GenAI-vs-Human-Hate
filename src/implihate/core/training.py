@@ -594,6 +594,15 @@ def main(experiment_num=3):
     LOG_DIR = f"logs_hsd_{model_name}_{ITER_NUM}"
     GPU_ID = 4
 
+    DS_FILEPATHS = {
+        1: "../../../data/final_hsd_v2_1217.csv",
+        2: "../../../data/final_hsd_v2_1217.csv",
+        3: "../../../data/final_hsd_1217.csv",
+        4: "../../../data/final_hsd_1217.csv",
+        5: "../../../data/final_hsd_1217.csv",
+        6: "../../../data/final_hsd_v2_1217.csv",
+    }
+
     print("Setting up mlflow")
     # Initialize mlflow
     mlflow.set_tracking_uri(
@@ -601,12 +610,14 @@ def main(experiment_num=3):
     )
     mlflow.set_experiment("HateBERT Training")
 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=f"Experiment {experiment_num}"):
         mlflow.set_tag("Experiment ID", f"{experiment_num}")
         # Load data
         print(f"loading experiment {experiment_num} dataset from csv")
         # df = load_hsd_dataset()  # Assume this function returns a labeled dataframe
-        df = load_experiment_dataset(experiment_num)
+        df = load_experiment_dataset(
+            experiment_num, filepath=DS_FILEPATHS[experiment_num]
+        )
         print("creating train/val/test split")
         train_dataset, val_dataset, test_dataset = create_text_classification_dataset(
             df, PRETRAINED_MODEL_NAME, MAX_LEN, TRAIN_SIZE, VAL_SIZE
@@ -758,8 +769,17 @@ def main(experiment_num=3):
 
         y_pred = model_preds(model, test_loader, device)
         y_true = test_dataset.labels
+        test_texts = test_dataset.texts
         test_cm = confusion_matrix(y_true, y_pred)
 
+        test_ds_with_preds = {"text": test_texts, "y_true": y_true, "y_pred": y_pred}
+        test_ds_with_preds_df = pd.DataFrame.from_dict(test_ds_with_preds)
+        TEST_DS_WITH_PREDS_FILENAME = (
+            f"experiment_{experiment_num}_test_ds_with_preds.csv"
+        )
+        test_ds_with_preds_df.to_csv(TEST_DS_WITH_PREDS_FILENAME, index=False)
+
+        mlflow.log_artifact(TEST_DS_WITH_PREDS_FILENAME)
         plt.figure(figsize=(8, 6))
         sns.heatmap(test_cm, annot=True, fmt="d")
         plt.xlabel("Predicted Label")
@@ -770,4 +790,6 @@ def main(experiment_num=3):
 
 
 if __name__ == "__main__":
-    main(experiment_num=5)
+    EXPERIMENT_IDS = [1, 2, 3, 4, 5, 6]
+    for experiment_num in EXPERIMENT_IDS:
+        main(experiment_num=experiment_num)
